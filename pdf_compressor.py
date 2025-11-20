@@ -650,7 +650,20 @@ def process_job(
 
             with fitz.open() as work:
                 for p in keep:
-                    work.insert_pdf(src, from_page=p, to_page=p)
+                    try:
+                        # Some PDFs contain malformed link destinations like
+                        # "1&view=Fit" which PyMuPDF attempts to parse as a
+                        # page number and raises ValueError. Fall back to
+                        # copying the page without link metadata so the job
+                        # can still complete.
+                        work.insert_pdf(src, from_page=p, to_page=p)
+                    except ValueError as e:
+                        logger.warning(
+                            "Page %s has invalid link metadata; copying without links (%s)",
+                            p + 1,
+                            e,
+                        )
+                        work.insert_pdf(src, from_page=p, to_page=p, links=False)
 
                 # 2) Optional cleanup in extreme mode
                 if extreme_compression:
