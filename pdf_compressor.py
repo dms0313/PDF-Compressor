@@ -85,7 +85,7 @@ HTML_PAGE = """
     </div>
 
     <div id="drop_zone">Drop PDF here or click to browse</div>
-    <input type="file" id="file_input" accept=".pdf">
+    <input type="file" id="file_input" accept=".pdf" multiple>
 
     <div class="settings">
       <h3>Compression Settings</h3>
@@ -152,6 +152,8 @@ HTML_PAGE = """
           pageInfo = document.getElementById('page_info');
 
     let currentFile = null;
+    let fileQueue = [];
+    let isProcessingQueue = false;
     let pageAnalysisData = null;
     let pagesToKeep = new Set();
 
@@ -166,29 +168,52 @@ HTML_PAGE = """
     dz.addEventListener('drop', e => {
       e.preventDefault();
       dz.classList.remove('hover');
-      if (e.dataTransfer.files[0]) {
+      if (e.dataTransfer.files && e.dataTransfer.files.length) {
         handleFile({ target: { files: e.dataTransfer.files } });
       }
     });
 
     function handleFile(e) {
-      const file = e.target.files[0];
-      if (!file) return;
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
 
-      if (file.type !== 'application/pdf') {
-        alert('Please select a PDF file.');
+      const accepted = [];
+      files.forEach(file => {
+        if (file.type !== 'application/pdf') {
+          alert(`Skipping ${file.name}: Please select a PDF file.`);
+          return;
+        }
+        if (file.size > 500 * 1024 * 1024) { // 500MB limit
+          alert(`Skipping ${file.name}: File too large. Maximum size is 500MB.`);
+          return;
+        }
+        fileQueue.push(file);
+        accepted.push(file);
+      });
+
+      if (!accepted.length) return;
+
+      st.textContent = `${accepted.length} file(s) added to queue. (${fileQueue.length} total)`;
+      fi.value = '';
+
+      if (!currentFile && !isProcessingQueue) {
+        prepareNextFile();
+      }
+    }
+
+    function prepareNextFile() {
+      currentFile = fileQueue.shift() || null;
+      if (!currentFile) {
+        dz.textContent = 'Drop PDF here or click to browse';
+        compressBtn.disabled = true;
+        analyzeBtn.disabled = true;
         return;
       }
-      if (file.size > 500 * 1024 * 1024) { // 500MB limit
-        alert('File too large. Maximum size is 500MB.');
-        return;
-      }
 
-      currentFile = file;
       analyzeBtn.disabled = false;
       compressBtn.disabled = false;
-      st.textContent = `File selected: ${file.name} (${(file.size/1024/1024).toFixed(1)}MB)`;
-      dz.textContent = file.name;
+      st.textContent = `File selected: ${currentFile.name} (${(currentFile.size/1024/1024).toFixed(1)}MB)`;
+      dz.textContent = currentFile.name;
 
       pageAnalysis.style.display = 'none';
       pageAnalysisData = null;
@@ -282,7 +307,11 @@ HTML_PAGE = """
     }
 
     function startCompression() {
+      if (!currentFile) {
+        prepareNextFile();
+      }
       if (!currentFile) return;
+      isProcessingQueue = true;
       const fd = new FormData();
       fd.append('file', currentFile);
       fd.append('quality', qualitySlider.value);
@@ -310,6 +339,7 @@ HTML_PAGE = """
           pc.style.display = 'none';
           compressBtn.disabled = false;
           analyzeBtn.disabled = false;
+          isProcessingQueue = false;
         });
     }
 
@@ -340,6 +370,7 @@ HTML_PAGE = """
           pc.style.display = 'none';
           compressBtn.disabled = false;
           analyzeBtn.disabled = false;
+          isProcessingQueue = false;
         });
     }
 
@@ -359,17 +390,35 @@ HTML_PAGE = """
                 a.remove();
                 URL.revokeObjectURL(url);
                 st.textContent = 'Download complete!';
-                compressBtn.disabled = false;
-                analyzeBtn.disabled = false;
+                compressBtn.disabled = true;
+                analyzeBtn.disabled = true;
                 setTimeout(() => {
                     pc.style.display = 'none';
                     st.textContent = `File selected: ${currentFile.name}`;
-                }, 4000);
+                    moveToNextInQueue();
+                }, 1200);
             }).catch(err => {
                 st.textContent = 'Download error: ' + err.message;
                 compressBtn.disabled = false;
                 analyzeBtn.disabled = false;
+                isProcessingQueue = false;
             });
+    }
+
+    function moveToNextInQueue() {
+      currentFile = null;
+      if (fileQueue.length) {
+        prepareNextFile();
+        if (isProcessingQueue) {
+          startCompression();
+        }
+      } else {
+        isProcessingQueue = false;
+        st.textContent = 'Queue complete! Add more files to process again.';
+        dz.textContent = 'Drop PDF here or click to browse';
+        compressBtn.disabled = true;
+        analyzeBtn.disabled = true;
+      }
     }
   </script>
 </body>
